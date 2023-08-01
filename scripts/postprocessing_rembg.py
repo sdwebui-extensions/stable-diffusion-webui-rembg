@@ -4,6 +4,11 @@ import gradio as gr
 from modules.ui_components import FormRow
 import rembg
 
+from modules.shared import cmd_opts, encode_image_to_base64
+from modules.api.api import decode_base64_to_image
+import requests
+import json
+
 models = [
     "None",
     "u2net",
@@ -49,15 +54,32 @@ class ScriptPostprocessingUpscale(scripts_postprocessing.ScriptPostprocessing):
     def process(self, pp: scripts_postprocessing.PostprocessedImage, model, return_mask, alpha_matting, alpha_matting_foreground_threshold, alpha_matting_background_threshold, alpha_matting_erode_size):
         if not model or model == "None":
             return
-
-        pp.image = rembg.remove(
-            pp.image,
-            session=rembg.new_session(model),
-            only_mask=return_mask,
-            alpha_matting=alpha_matting,
-            alpha_matting_foreground_threshold=alpha_matting_foreground_threshold,
-            alpha_matting_background_threshold=alpha_matting_background_threshold,
-            alpha_matting_erode_size=alpha_matting_erode_size,
-        )
+        
+        if cmd_opts.just_ui:
+            server_url = '/'.join([cmd_opts.server_path, 'rembg'])
+            req_dict = dict(
+                input_image = encode_image_to_base64(pp.image),
+                model = model, 
+                return_mask = return_mask, 
+                alpha_matting = alpha_matting, 
+                alpha_matting_foreground_threshold = alpha_matting_foreground_threshold, 
+                alpha_matting_background_threshold = alpha_matting_background_threshold, 
+                alpha_matting_erode_size = alpha_matting_erode_size
+            )
+            result = requests.post(server_url, json=req_dict)
+            if result.status_code==200:
+                pp.image = decode_base64_to_image(json.loads(result.text)['image'])
+            else:
+                raise Exception(f'failed to request server {server_url} with excepth {result.text}')
+        else:
+            pp.image = rembg.remove(
+                pp.image,
+                session=rembg.new_session(model),
+                only_mask=return_mask,
+                alpha_matting=alpha_matting,
+                alpha_matting_foreground_threshold=alpha_matting_foreground_threshold,
+                alpha_matting_background_threshold=alpha_matting_background_threshold,
+                alpha_matting_erode_size=alpha_matting_erode_size,
+            )
 
         pp.info["Rembg"] = model
